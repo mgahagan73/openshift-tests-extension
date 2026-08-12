@@ -67,6 +67,19 @@ var _ = Describe("[sig-testing] example-tests run-suite", Label("framework"), fu
 		Expect(foundPending).To(BeTrue(), "Expected pending test (XIt) to be reported as skipped")
 	})
 
+	It("should have structured timeout output for a timed-out test", func() {
+		var found bool
+		for _, test := range result {
+			if test.Name == "[sig-testing] openshift-tests-extension should report structured timeout for node timeout" && test.Result == "failed" {
+				found = true
+				Expect(test.Error).To(ContainSubstring("A node timeout occurred"), "Expected Ginkgo's structured timeout message")
+				Expect(test.Error).NotTo(ContainSubstring("Deserialization Error"), "Timeout should not fall through to generic parse error")
+				break
+			}
+		}
+		Expect(found).To(BeTrue(), "Expected the timed-out test result to be present with structured timeout info")
+	})
+
 	It("fast suite should not have a slow test", func() {
 		foundTest := false
 		for _, test := range result {

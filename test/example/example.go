@@ -60,4 +60,11 @@ var _ = Describe("[sig-testing] openshift-tests-extension", func() {
 		// This test is pending (XIt) and should be reported as skipped, not panic.
 		Expect(true).To(BeTrue())
 	})
+
+	It("should report structured timeout for node timeout", NodeTimeout(3*time.Second), func(ctx SpecContext) {
+		select {
+		case <-time.After(time.Minute):
+		case <-ctx.Done():
+		}
+	})
 })
