@@ -207,6 +207,87 @@ func TestIntegrationStdoutContamination(t *testing.T) {
 	}
 }
 
+func TestMergeEnv(t *testing.T) {
+	tests := []struct {
+		name     string
+		base     []string
+		extra    map[string]string
+		contains []string
+		length   int
+	}{
+		{
+			name:     "nil extra returns copy of base",
+			base:     []string{"A=1", "B=2"},
+			extra:    nil,
+			contains: []string{"A=1", "B=2"},
+			length:   2,
+		},
+		{
+			name:     "empty extra returns copy of base",
+			base:     []string{"A=1"},
+			extra:    map[string]string{},
+			contains: []string{"A=1"},
+			length:   1,
+		},
+		{
+			name:     "extra vars appended to base",
+			base:     []string{"A=1"},
+			extra:    map[string]string{"B": "2"},
+			contains: []string{"A=1", "B=2"},
+			length:   2,
+		},
+		{
+			name:     "override existing key appends duplicate (last wins in exec.Cmd)",
+			base:     []string{"A=original"},
+			extra:    map[string]string{"A": "override"},
+			contains: []string{"A=original", "A=override"},
+			length:   2,
+		},
+		{
+			name:     "empty base with extra",
+			base:     nil,
+			extra:    map[string]string{"X": "y"},
+			contains: []string{"X=y"},
+			length:   1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := mergeEnv(tt.base, tt.extra)
+			if len(got) != tt.length {
+				t.Errorf("mergeEnv() returned %d entries, want %d: %v", len(got), tt.length, got)
+			}
+			for _, want := range tt.contains {
+				found := false
+				for _, entry := range got {
+					if entry == want {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("mergeEnv() result missing %q, got %v", want, got)
+				}
+			}
+		})
+	}
+}
+
+func TestMergeEnvDoesNotMutateBase(t *testing.T) {
+	base := []string{"A=1", "B=2"}
+	baseCopy := make([]string, len(base))
+	copy(baseCopy, base)
+
+	_ = mergeEnv(base, map[string]string{"C": "3"})
+
+	for i := range base {
+		if base[i] != baseCopy[i] {
+			t.Errorf("mergeEnv mutated base[%d]: got %q, want %q", i, base[i], baseCopy[i])
+		}
+	}
+}
+
 func TestNewTestResultFromOutput(t *testing.T) {
 	tests := []struct {
 		name       string

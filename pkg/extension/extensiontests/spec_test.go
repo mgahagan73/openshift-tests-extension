@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -165,61 +166,76 @@ func TestExtensionTestSpecs_Run_IsolationAware(t *testing.T) {
 
 func TestExtensionTestSpecs_HookExecution(t *testing.T) {
 	testCases := []struct {
-		name               string
-		expectedBeforeAll  int32
-		expectedBeforeEach int32
-		expectedAfterEach  int32
-		expectedAfterAll   int32
-		numSpecs           int
-		numSpecSets        int
+		name                string
+		expectedBeforeAll   int32
+		expectedBeforeSpawn int32
+		expectedBeforeEach  int32
+		expectedAfterEach   int32
+		expectedAfterAll    int32
+		numSpecs            int
 	}{
 		{
-			name:               "all hooks run - high test count",
-			expectedBeforeAll:  1,
-			expectedBeforeEach: 10000,
-			expectedAfterEach:  10000,
-			expectedAfterAll:   1,
-			numSpecs:           10000,
+			name:                "all hooks run - high test count",
+			expectedBeforeAll:   1,
+			expectedBeforeSpawn: 10000,
+			expectedBeforeEach:  10000,
+			expectedAfterEach:   10000,
+			expectedAfterAll:    1,
+			numSpecs:            10000,
 		},
 		{
-			name:               "no AddBeforeAll",
-			expectedBeforeAll:  0,
-			expectedBeforeEach: 2,
-			expectedAfterEach:  2,
-			expectedAfterAll:   1,
-			numSpecs:           2,
+			name:                "no AddBeforeAll",
+			expectedBeforeAll:   0,
+			expectedBeforeSpawn: 2,
+			expectedBeforeEach:  2,
+			expectedAfterEach:   2,
+			expectedAfterAll:    1,
+			numSpecs:            2,
 		},
 		{
-			name:               "no AddAfterEach",
-			expectedBeforeAll:  1,
-			expectedBeforeEach: 2,
-			expectedAfterEach:  0,
-			expectedAfterAll:   1,
-			numSpecs:           2,
+			name:                "no AddAfterEach",
+			expectedBeforeAll:   1,
+			expectedBeforeSpawn: 2,
+			expectedBeforeEach:  2,
+			expectedAfterEach:   0,
+			expectedAfterAll:    1,
+			numSpecs:            2,
 		},
 		{
-			name:               "only AddAfterAll",
-			expectedBeforeAll:  0,
-			expectedBeforeEach: 0,
-			expectedAfterEach:  0,
-			expectedAfterAll:   1,
-			numSpecs:           2,
+			name:                "only AddAfterAll",
+			expectedBeforeAll:   0,
+			expectedBeforeSpawn: 0,
+			expectedBeforeEach:  0,
+			expectedAfterEach:   0,
+			expectedAfterAll:    1,
+			numSpecs:            2,
 		},
 		{
-			name:               "beforeEach only",
-			expectedBeforeAll:  0,
-			expectedBeforeEach: 2,
-			expectedAfterEach:  0,
-			expectedAfterAll:   0,
-			numSpecs:           2,
+			name:                "beforeEach only",
+			expectedBeforeAll:   0,
+			expectedBeforeSpawn: 0,
+			expectedBeforeEach:  2,
+			expectedAfterEach:   0,
+			expectedAfterAll:    0,
+			numSpecs:            2,
 		},
 		{
-			name:               "beforeAll and afterAll only",
-			expectedBeforeAll:  1,
-			expectedBeforeEach: 0,
-			expectedAfterEach:  0,
-			expectedAfterAll:   1,
-			numSpecs:           2,
+			name:                "beforeSpawn only",
+			expectedBeforeAll:   0,
+			expectedBeforeSpawn: 2,
+			expectedBeforeEach:  0,
+			expectedAfterEach:   0,
+			expectedAfterAll:    0,
+			numSpecs:            2,
+		},
+		{
+			name:                "beforeAll and afterAll only",
+			expectedBeforeAll:   1,
+			expectedBeforeSpawn: 0,
+			expectedBeforeEach:  0,
+			expectedAfterEach:   0,
+			expectedAfterAll:    1,
+			numSpecs:            2,
 		},
 	}
 
@@ -236,12 +252,17 @@ func TestExtensionTestSpecs_HookExecution(t *testing.T) {
 			}
 
 			// Hook invocation counters
-			var beforeAllCount, beforeEachCount, afterEachCount, afterAllCount atomic.Int32
+			var beforeAllCount, beforeSpawnCount, beforeEachCount, afterEachCount, afterAllCount atomic.Int32
 
 			// Set up hooks based on the expected test case
 			if tc.expectedBeforeAll > 0 {
 				specs.AddBeforeAll(func() {
 					beforeAllCount.Add(1)
+				})
+			}
+			if tc.expectedBeforeSpawn > 0 {
+				specs.AddBeforeSpawn(func(_ *ExtensionTestSpec) {
+					beforeSpawnCount.Add(1)
 				})
 			}
 			if tc.expectedBeforeEach > 0 {
@@ -271,6 +292,10 @@ func TestExtensionTestSpecs_HookExecution(t *testing.T) {
 				t.Errorf("Expected BeforeAll to run %d times, but ran %d times", tc.expectedBeforeAll,
 					beforeAllCount.Load())
 			}
+			if beforeSpawnCount.Load() != tc.expectedBeforeSpawn {
+				t.Errorf("Expected BeforeSpawn to run %d times, but ran %d times", tc.expectedBeforeSpawn,
+					beforeSpawnCount.Load())
+			}
 			if beforeEachCount.Load() != tc.expectedBeforeEach {
 				t.Errorf("Expected BeforeEach to run %d times, but ran %d times", tc.expectedBeforeEach,
 					beforeEachCount.Load())
@@ -284,6 +309,113 @@ func TestExtensionTestSpecs_HookExecution(t *testing.T) {
 					afterAllCount.Load())
 			}
 		})
+	}
+}
+
+func TestExtensionTestSpecs_BeforeSpawnSetsEnv(t *testing.T) {
+	var capturedEnv atomic.Value
+	specs := ExtensionTestSpecs{
+		{
+			Name: "env-test",
+			Run: func(ctx context.Context) *ExtensionTestResult {
+				return &ExtensionTestResult{Name: "env-test", Result: ResultPassed}
+			},
+		},
+	}
+
+	specs.AddBeforeSpawn(func(spec *ExtensionTestSpec) {
+		spec.Env = map[string]string{"INJECTED": "yes"}
+	})
+
+	specs.AddBeforeEach(func(spec ExtensionTestSpec) {
+		capturedEnv.Store(spec.Env)
+	})
+
+	_, err := specs.Run(context.TODO(), NullResultWriter{}, 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	env, ok := capturedEnv.Load().(map[string]string)
+	if !ok {
+		t.Fatal("BeforeEach did not capture env")
+	}
+	if env["INJECTED"] != "yes" {
+		t.Errorf("expected Env[INJECTED]=yes, got %v", env)
+	}
+}
+
+func TestExtensionTestSpecs_BeforeSpawnRunsBeforeBeforeEach(t *testing.T) {
+	var order []string
+	var mu sync.Mutex
+
+	specs := ExtensionTestSpecs{
+		{
+			Name: "order-test",
+			Run: func(ctx context.Context) *ExtensionTestResult {
+				return &ExtensionTestResult{Name: "order-test", Result: ResultPassed}
+			},
+		},
+	}
+
+	specs.AddBeforeSpawn(func(spec *ExtensionTestSpec) {
+		mu.Lock()
+		defer mu.Unlock()
+		order = append(order, "beforeSpawn")
+	})
+
+	specs.AddBeforeEach(func(_ ExtensionTestSpec) {
+		mu.Lock()
+		defer mu.Unlock()
+		order = append(order, "beforeEach")
+	})
+
+	_, err := specs.Run(context.TODO(), NullResultWriter{}, 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	assert.Equal(t, []string{"beforeSpawn", "beforeEach"}, order)
+}
+
+func TestExtensionTestSpecs_BeforeSpawnEnvVisibleInRunParallel(t *testing.T) {
+	var capturedEnvs sync.Map
+
+	makeSpec := func(name string) *ExtensionTestSpec {
+		spec := &ExtensionTestSpec{
+			Name: name,
+			Run: func(ctx context.Context) *ExtensionTestResult {
+				t.Errorf("Run() should not be called for multi-spec suite")
+				return &ExtensionTestResult{Name: name, Result: ResultFailed}
+			},
+		}
+		spec.RunParallel = func(ctx context.Context) *ExtensionTestResult {
+			capturedEnvs.Store(name, spec.Env)
+			return &ExtensionTestResult{Name: name, Result: ResultPassed}
+		}
+		return spec
+	}
+
+	specs := ExtensionTestSpecs{makeSpec("spec-a"), makeSpec("spec-b")}
+
+	specs.AddBeforeSpawn(func(spec *ExtensionTestSpec) {
+		spec.Env = map[string]string{"ASSIGNED_TO": spec.Name}
+	})
+
+	_, err := specs.Run(context.TODO(), NullResultWriter{}, 2)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, name := range []string{"spec-a", "spec-b"} {
+		val, ok := capturedEnvs.Load(name)
+		if !ok {
+			t.Fatalf("RunParallel never ran for %s", name)
+		}
+		env := val.(map[string]string)
+		if env["ASSIGNED_TO"] != name {
+			t.Errorf("spec %s: expected Env[ASSIGNED_TO]=%s, got %v", name, name, env)
+		}
 	}
 }
 

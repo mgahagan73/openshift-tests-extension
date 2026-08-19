@@ -193,9 +193,11 @@ func (specs ExtensionTestSpecs) Names() []string {
 }
 
 // Run executes all the specs in parallel, up to maxConcurrent at the same time. Results
-// are written to the given ResultWriter after each spec has completed execution.  BeforeEach,
-// BeforeAll, AfterEach, AfterAll hooks are executed when specified. "Each" hooks must be thread
-// safe. Returns an error if any test spec failed, indicating the quantity of failures.
+// are written to the given ResultWriter after each spec has completed execution. Hooks
+// run in the following order per spec: BeforeSpawn (pointer, may mutate), BeforeEach
+// (value copy, read-only), test execution, AfterEach. BeforeAll runs once before any
+// spec; AfterAll runs once after all specs complete. "Each" and "Spawn" hooks must be
+// thread safe. Returns an error if any test spec failed, indicating the quantity of failures.
 //
 // Tests are scheduled using isolation-aware scheduling that respects conflicts, taints, and
 // tolerations defined in each spec's Resources.Isolation field.
@@ -239,6 +241,10 @@ func (specs ExtensionTestSpecs) Run(ctx context.Context, w ResultWriter, maxConc
 
 				func() {
 					defer scheduler.MarkTestComplete(spec)
+
+					for _, beforeSpawnTask := range spec.beforeSpawn {
+						beforeSpawnTask.Run(spec)
+					}
 
 					for _, beforeEachTask := range spec.beforeEach {
 						beforeEachTask.Run(*spec)
@@ -315,6 +321,18 @@ func (specs ExtensionTestSpecs) AddAfterAll(fn func()) {
 	task := &OneTimeTask{fn: fn}
 	specs.Walk(func(spec *ExtensionTestSpec) {
 		spec.afterAll = append(spec.afterAll, task)
+	})
+}
+
+// AddBeforeSpawn adds a function that runs after the scheduler dispatches a test but before
+// the child process is spawned (or before in-process execution for single-spec runs). Unlike
+// BeforeEach, the function receives a pointer to the spec and may mutate it — the primary use
+// case is populating spec.Env with per-dispatch data such as resource-pool assignments. The
+// provided function must be thread safe.
+func (specs ExtensionTestSpecs) AddBeforeSpawn(fn func(spec *ExtensionTestSpec)) {
+	task := &SpecMutatingTask{fn: fn}
+	specs.Walk(func(spec *ExtensionTestSpec) {
+		spec.beforeSpawn = append(spec.beforeSpawn, task)
 	})
 }
 

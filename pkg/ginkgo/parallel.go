@@ -20,7 +20,20 @@ import (
 // (e.g. via NodeTimeout) before the parent escalates.
 const parentGracePeriod = 2 * time.Minute
 
+// SpawnProcessToRunTestWithEnv is like SpawnProcessToRunTest but merges extra
+// environment variables into the child process. Each entry in env is set on the
+// child's os/exec.Cmd.Env on top of the parent's os.Environ(), so the child
+// inherits the full parent environment plus the provided overrides.
+// A nil or empty env is equivalent to calling SpawnProcessToRunTest.
+func SpawnProcessToRunTestWithEnv(ctx context.Context, testName string, timeout time.Duration, env map[string]string) *extensiontests.ExtensionTestResult {
+	return spawnProcess(ctx, testName, timeout, env)
+}
+
 func SpawnProcessToRunTest(ctx context.Context, testName string, timeout time.Duration) *extensiontests.ExtensionTestResult {
+	return SpawnProcessToRunTestWithEnv(ctx, testName, timeout, nil)
+}
+
+func spawnProcess(ctx context.Context, testName string, timeout time.Duration, env map[string]string) *extensiontests.ExtensionTestResult {
 	parentTimeout := timeout + parentGracePeriod
 	// longerCtx is used to backstop the process, but leave termination up to us if possible to allow a double interrupt
 	longerCtx, longerCancel := context.WithTimeout(ctx, parentTimeout+15*time.Minute)
@@ -34,6 +47,10 @@ func SpawnProcessToRunTest(ctx context.Context, testName string, timeout time.Du
 	command := exec.CommandContext(longerCtx, os.Args[0], "run-test", "--output=json", fmt.Sprintf("--timeout=%s", timeout), testName)
 	command.Stdout = stdout
 	command.Stderr = stderr
+
+	if len(env) > 0 {
+		command.Env = mergeEnv(os.Environ(), env)
+	}
 
 	start := time.Now()
 	err := command.Start()
@@ -167,4 +184,16 @@ func newTestResult(name string, result extensiontests.Result, start, end time.Ti
 	}
 
 	return ret
+}
+
+// mergeEnv appends extra environment variables to a base slice (typically
+// os.Environ()). Duplicate keys are not deduplicated — the last value wins
+// per exec.Cmd.Env semantics (Go's os/exec uses the last occurrence).
+func mergeEnv(base []string, extra map[string]string) []string {
+	merged := make([]string, len(base), len(base)+len(extra))
+	copy(merged, base)
+	for k, v := range extra {
+		merged = append(merged, fmt.Sprintf("%s=%s", k, v))
+	}
+	return merged
 }

@@ -64,19 +64,29 @@ type ExtensionTestSpec struct {
 	// timeout used by SpawnProcessToRunTest. This is typically populated from Suite.TestTimeout.
 	Timeout time.Duration `json:"-"`
 
+	// Env holds additional environment variables to pass to the child process when
+	// running this spec via SpawnProcessToRunTestWithEnv. Each entry is merged on
+	// top of the parent's environment (os.Environ); a nil or empty map inherits the
+	// parent environment unchanged. BeforeSpawn hooks can populate this field at
+	// dispatch time — for example, to inject resource-pool assignments that were
+	// reserved by the scheduler. Env is only applied when spawning a child process
+	// (the RunParallel path); it has no effect on in-process execution via Run.
+	Env map[string]string `json:"-"`
+
 	// Hook functions
-	afterAll   []*OneTimeTask
-	beforeAll  []*OneTimeTask
-	afterEach  []*TestResultTask
-	beforeEach []*SpecTask
+	afterAll    []*OneTimeTask
+	beforeAll   []*OneTimeTask
+	afterEach   []*TestResultTask
+	beforeEach  []*SpecTask
+	beforeSpawn []*SpecMutatingTask
 }
 
 type Resources struct {
-	Isolation Isolation      `json:"isolation"`
+	Isolation     Isolation      `json:"isolation"`
 	ResourcePools map[string]int `json:"resourcePools,omitempty"`
-	Memory    string         `json:"memory,omitempty"`
-	Duration  string         `json:"duration,omitempty"`
-	Timeout   string         `json:"timeout,omitempty"`
+	Memory        string         `json:"memory,omitempty"`
+	Duration      string         `json:"duration,omitempty"`
+	Timeout       string         `json:"timeout,omitempty"`
 }
 
 type Isolation struct {

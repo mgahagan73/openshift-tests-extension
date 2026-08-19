@@ -147,7 +147,7 @@ func BuildExtensionTestSpecsFromOpenShiftGinkgoSuite(selectFns ...ext.SelectFunc
 			if testCase.Timeout > 0 {
 				timeout = testCase.Timeout
 			}
-			return SpawnProcessToRunTest(ctx, name, timeout)
+			return SpawnProcessToRunTestWithEnv(ctx, name, timeout, testCase.Env)
 		}
 		specs = append(specs, testCase)
 	})
