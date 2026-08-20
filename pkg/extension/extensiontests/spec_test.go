@@ -419,6 +419,55 @@ func TestExtensionTestSpecs_BeforeSpawnEnvVisibleInRunParallel(t *testing.T) {
 	}
 }
 
+func TestExtensionTestSpecs_BeforeEachCannotMutateEnvSeenByRunParallel(t *testing.T) {
+	var capturedEnv atomic.Value
+
+	spec := &ExtensionTestSpec{
+		Name: "env-isolation",
+		Run: func(ctx context.Context) *ExtensionTestResult {
+			t.Error("Run() should not be called for multi-spec suite")
+			return &ExtensionTestResult{Name: "env-isolation", Result: ResultFailed}
+		},
+	}
+	spec.RunParallel = func(ctx context.Context) *ExtensionTestResult {
+		capturedEnv.Store(spec.Env)
+		return &ExtensionTestResult{Name: spec.Name, Result: ResultPassed}
+	}
+	// A second spec is required so runSpec takes the RunParallel path.
+	other := &ExtensionTestSpec{
+		Name: "other",
+		Run:  spec.Run,
+	}
+	other.RunParallel = func(ctx context.Context) *ExtensionTestResult {
+		return &ExtensionTestResult{Name: other.Name, Result: ResultPassed}
+	}
+
+	specs := ExtensionTestSpecs{spec, other}
+	specs.AddBeforeSpawn(func(s *ExtensionTestSpec) {
+		s.Env = map[string]string{"ASSIGNED_TO": s.Name}
+	})
+	specs.AddBeforeEach(func(s ExtensionTestSpec) {
+		s.Env["ASSIGNED_TO"] = "tampered"
+		s.Env["EXTRA"] = "from-before-each"
+	})
+
+	_, err := specs.Run(context.TODO(), NullResultWriter{}, 2)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	env, ok := capturedEnv.Load().(map[string]string)
+	if !ok {
+		t.Fatal("RunParallel did not capture env")
+	}
+	if env["ASSIGNED_TO"] != "env-isolation" {
+		t.Errorf("expected Env[ASSIGNED_TO]=env-isolation, got %v", env)
+	}
+	if _, present := env["EXTRA"]; present {
+		t.Errorf("BeforeEach must not add keys to the Env seen by RunParallel, got %v", env)
+	}
+}
+
 func TestExtensionTestSpec_Include(t *testing.T) {
 	testCases := []struct {
 		name     string

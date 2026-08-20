@@ -3,6 +3,7 @@ package extensiontests
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"strings"
 	"sync"
@@ -247,7 +248,11 @@ func (specs ExtensionTestSpecs) Run(ctx context.Context, w ResultWriter, maxConc
 					}
 
 					for _, beforeEachTask := range spec.beforeEach {
-						beforeEachTask.Run(*spec)
+						// Clone Env so BeforeEach cannot mutate the map that RunParallel
+						// later passes to the child. Other fields stay a shallow copy.
+						snapshot := *spec
+						snapshot.Env = maps.Clone(spec.Env)
+						beforeEachTask.Run(snapshot)
 					}
 
 					res := runSpec(ctx, spec, runSingleSpec)
@@ -337,8 +342,9 @@ func (specs ExtensionTestSpecs) AddBeforeSpawn(fn func(spec *ExtensionTestSpec))
 }
 
 // AddBeforeEach adds a function that runs before each test starts executing. The ExtensionTestSpec is
-// passed in for contextual information, but must not be modified. The provided function must be thread
-// safe.
+// passed in for contextual information, but must not be modified. Env is cloned before the callback
+// so map mutations cannot affect the environment passed to RunParallel. The provided function must
+// be thread safe.
 func (specs ExtensionTestSpecs) AddBeforeEach(fn func(spec ExtensionTestSpec)) {
 	task := &SpecTask{fn: fn}
 	specs.Walk(func(spec *ExtensionTestSpec) {
