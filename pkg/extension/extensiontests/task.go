@@ -18,15 +18,14 @@ func (t *TestResultTask) Run(result *ExtensionTestResult) {
 	t.fn(result)
 }
 
-// SpecMutatingTask wraps a function that receives a pointer to the spec,
-// allowing mutation. Used by BeforeSpawn hooks to inject per-dispatch data
-// (e.g. Env) before the child process is created.
-type SpecMutatingTask struct {
-	fn func(spec *ExtensionTestSpec)
+// BeforeSpawnTask wraps a function that can configure a parallel test process
+// immediately before it is spawned.
+type BeforeSpawnTask struct {
+	fn func(name string, options *SpawnOptions)
 }
 
-func (t *SpecMutatingTask) Run(spec *ExtensionTestSpec) {
-	t.fn(spec)
+func (t *BeforeSpawnTask) Run(name string, options *SpawnOptions) {
+	t.fn(name, options)
 }
 
 type OneTimeTask struct {

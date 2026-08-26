@@ -59,24 +59,14 @@ func TestTestResultTask_RunMayMutate(t *testing.T) {
 	assert.Equal(t, myRes.Result, ResultFailed)
 }
 
-func TestSpecMutatingTask_RunMayMutate(t *testing.T) {
-	mySpec := &ExtensionTestSpec{Name: "original"}
-	task := &SpecMutatingTask{
-		fn: func(spec *ExtensionTestSpec) {
-			spec.Env = map[string]string{"KEY": "value"}
+func TestBeforeSpawnTask_RunMayMutateOptions(t *testing.T) {
+	options := &SpawnOptions{}
+	task := &BeforeSpawnTask{
+		fn: func(name string, options *SpawnOptions) {
+			assert.Equal(t, "original", name)
+			options.Env = map[string]string{"KEY": "value"}
 		},
 	}
-	task.Run(mySpec)
-	assert.Equal(t, map[string]string{"KEY": "value"}, mySpec.Env)
-}
-
-func TestSpecMutatingTask_RunMutatesOriginal(t *testing.T) {
-	mySpec := &ExtensionTestSpec{Name: "test-spec"}
-	task := &SpecMutatingTask{
-		fn: func(spec *ExtensionTestSpec) {
-			spec.Name = "mutated"
-		},
-	}
-	task.Run(mySpec)
-	assert.Equal(t, "mutated", mySpec.Name)
+	task.Run("original", options)
+	assert.Equal(t, map[string]string{"KEY": "value"}, options.Env)
 }
